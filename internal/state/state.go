@@ -4,8 +4,9 @@ package state
 import "github.com/soheil-stack/blockchain/internal/core"
 
 type StateConfig struct {
-	Genesis   core.Genesis
-	EvHandler EventHandler
+	Genesis        core.Genesis
+	EvHandler      EventHandler
+	SelectStrategy string
 }
 
 type State struct {
@@ -13,12 +14,15 @@ type State struct {
 	mempool *Mempool
 }
 
-func NewState(config StateConfig) *State {
+func NewState(config StateConfig) (*State, error) {
 	db := NewDatabase(config.Genesis, config.EvHandler)
-	mempool := NewMempool()
+	mempool, err := NewMempool(config.SelectStrategy)
+	if err != nil {
+		return nil, err
+	}
 
 	return &State{
 		db:      db,
 		mempool: mempool,
-	}
+	}, nil
 }

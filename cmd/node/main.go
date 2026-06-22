@@ -21,6 +21,7 @@ func run() error {
 	cfg := struct {
 		Beneficiary       string `conf:"default:beneficiary"`
 		NameServiceFolder string `conf:"default:zblock/accounts"`
+		SelectStrategy    string `conf:"default:tip"`
 	}{}
 
 	help, err := conf.Parse("NODE", &cfg)
@@ -51,11 +52,16 @@ func run() error {
 		return fmt.Errorf("unable to load beneficiary private key: %w", err)
 	}
 
-	n := node.New(node.Config{
-		Beneficiary: crypto.PubkeyToAddress(beneficiaryPrivateKey.PublicKey),
-		Genesis:     genesis,
-		EvHandler:   evHandler,
+	n, err := node.New(node.Config{
+		Beneficiary:    crypto.PubkeyToAddress(beneficiaryPrivateKey.PublicKey),
+		Genesis:        genesis,
+		EvHandler:      evHandler,
+		SelectStrategy: cfg.SelectStrategy,
 	})
+	if err != nil {
+		return err
+	}
+
 	defer func() {
 		_ = n.Shutdown()
 	}()

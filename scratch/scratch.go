@@ -15,6 +15,12 @@ func main() {
 }
 
 func run() error {
+	var a []byte
+	a = append(a, 0x01)
+	a = append(a, 0x02)
+
+	fmt.Println(a[3:])
+
 	return nil
 }
 

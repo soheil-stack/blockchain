@@ -8,9 +8,10 @@ import (
 )
 
 type Config struct {
-	Beneficiary common.Address
-	Genesis     core.Genesis
-	EvHandler   state.EventHandler
+	Beneficiary    common.Address
+	Genesis        core.Genesis
+	EvHandler      state.EventHandler
+	SelectStrategy string
 }
 
 type Node struct {
@@ -18,22 +19,26 @@ type Node struct {
 	EvHandler state.EventHandler
 }
 
-func New(config Config) *Node {
+func New(config Config) (*Node, error) {
 	ev := func(v string, args ...any) {
 		if config.EvHandler != nil {
 			config.EvHandler(v, args...)
 		}
 	}
 
-	state := state.NewState(state.StateConfig{
-		Genesis:   config.Genesis,
-		EvHandler: ev,
+	state, err := state.NewState(state.StateConfig{
+		Genesis:        config.Genesis,
+		EvHandler:      ev,
+		SelectStrategy: config.SelectStrategy,
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	return &Node{
 		State:     state,
 		EvHandler: ev,
-	}
+	}, nil
 }
 
 func (node *Node) Shutdown() error {

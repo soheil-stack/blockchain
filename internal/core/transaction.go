@@ -28,9 +28,8 @@ type Transaction struct {
 	R *big.Int `json:"r"`
 	S *big.Int `json:"s"`
 
-	Timestamp uint64 `json:"timestamp"`
-	GasPrice  uint64 `json:"gasPrice"`
-	GasUnits  uint64 `json:"gasUnits"`
+	GasPrice uint64 `json:"gasPrice"`
+	GasUnits uint64 `json:"gasUnits"`
 }
 
 func NewTransaction(chainID uint64, nonce uint64, from, to common.Address, value, tip uint64, data []byte) *Transaction {
@@ -92,18 +91,23 @@ func (tx *Transaction) SetSignature(sig []byte) error {
 	return nil
 }
 
-func (tx *Transaction) Signature() []byte {
+func (tx *Transaction) Signature() ([]byte, error) {
+	if tx.R == nil || tx.S == nil || tx.V == nil {
+		return nil, errors.New("signature is nil")
+	}
+
 	sig := make([]byte, 65)
 	tx.R.FillBytes(sig[:32])
 	tx.S.FillBytes(sig[32:64])
 	tx.V.FillBytes(sig[64:])
 
-	return sig
+	return sig, nil
 }
 
 func (tx *Transaction) Verify(chainID uint64) (bool, error) {
-	if tx.R == nil || tx.S == nil || tx.V == nil {
-		return false, errors.New("signature is nil")
+	signature, err := tx.Signature()
+	if err != nil {
+		return false, err
 	}
 
 	if tx.ChainID != chainID {
@@ -120,7 +124,7 @@ func (tx *Transaction) Verify(chainID uint64) (bool, error) {
 
 	txHash := tx.SigHash()
 
-	pubkey, err := crypto.SigToPub(txHash[:], tx.Signature())
+	pubkey, err := crypto.SigToPub(txHash[:], signature)
 	if err != nil {
 		return false, err
 	}
