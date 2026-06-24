@@ -1,14 +1,21 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"time"
 
 	"github.com/ardanlabs/conf/v3"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/soheil-stack/blockchain/cmd/node/handlers/private"
+	"github.com/soheil-stack/blockchain/cmd/node/handlers/public"
 	"github.com/soheil-stack/blockchain/internal/core"
-	"github.com/soheil-stack/blockchain/internal/node"
+	"github.com/soheil-stack/blockchain/internal/state"
 )
 
 func main() {
@@ -52,7 +59,7 @@ func run() error {
 		return fmt.Errorf("unable to load beneficiary private key: %w", err)
 	}
 
-	n, err := node.New(node.Config{
+	state, err := state.NewState(state.StateConfig{
 		Beneficiary:    crypto.PubkeyToAddress(beneficiaryPrivateKey.PublicKey),
 		Genesis:        genesis,
 		EvHandler:      evHandler,
@@ -61,10 +68,49 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	defer state.Shutdown()
 
-	defer func() {
-		_ = n.Shutdown()
+	sigint := make(chan os.Signal, 1)
+	signal.Notify(sigint, os.Interrupt)
+
+	serverError := make(chan error, 1)
+
+	publicHandler := public.NewServer(state)
+	publicServer := http.Server{
+		Addr:         ":8080",
+		Handler:      publicHandler,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 20 * time.Second,
+		IdleTimeout:  time.Minute,
+	}
+	go func() {
+		serverError <- publicServer.ListenAndServe()
 	}()
+
+	privateHandler := private.NewServer(state)
+	privateServer := http.Server{
+		Addr:         ":8081",
+		Handler:      privateHandler,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 20 * time.Second,
+		IdleTimeout:  time.Minute,
+	}
+	go func() {
+		serverError <- privateServer.ListenAndServe()
+	}()
+
+	select {
+	case err := <-serverError:
+		return fmt.Errorf("server error: %w", err)
+	case <-sigint:
+		if err := publicServer.Shutdown(context.Background()); err != nil {
+			return fmt.Errorf("could not shutdown public server gracefully: %w", err)
+		}
+
+		if err := privateServer.Shutdown(context.Background()); err != nil {
+			return fmt.Errorf("could not shutdown private server gracefully: %w", err)
+		}
+	}
 
 	return nil
 }
