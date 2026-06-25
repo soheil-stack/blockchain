@@ -2,10 +2,7 @@ module github.com/soheil-stack/blockchain
 
 go 1.26.3
 
-require (
-	github.com/ardanlabs/conf/v3 v3.12.0
-	github.com/ethereum/go-ethereum v1.17.3
-)
+require github.com/ethereum/go-ethereum v1.17.3
 
 require (
 	github.com/ProjectZKM/Ziren/crates/go-runtime/zkvm_runtime v0.0.0-20251001021608-1fe7b43fc4d6 // indirect

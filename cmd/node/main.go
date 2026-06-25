@@ -10,7 +10,6 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/ardanlabs/conf/v3"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/soheil-stack/blockchain/cmd/node/handlers/private"
 	"github.com/soheil-stack/blockchain/cmd/node/handlers/public"
@@ -29,21 +28,22 @@ func main() {
 	}
 }
 
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 func run(log *slog.Logger) error {
 	cfg := struct {
-		Beneficiary       string `conf:"default:beneficiary"`
-		NameServiceFolder string `conf:"default:zblock/accounts"`
-		SelectStrategy    string `conf:"default:tip"`
-	}{}
-
-	help, err := conf.Parse("NODE", &cfg)
-	if err != nil {
-		if errors.Is(err, conf.ErrHelpWanted) {
-			fmt.Println(help)
-			return nil
-		}
-
-		return fmt.Errorf("parsing config: %w", err)
+		Beneficiary       string
+		NameServiceFolder string
+		SelectStrategy    string
+	}{
+		Beneficiary:       getEnv("BENEFICIARY", "beneficiary"),
+		NameServiceFolder: getEnv("NAME_SERVICE_FOLDER", "zblock/accounts"),
+		SelectStrategy:    getEnv("SELECT_STRATEGY", "tip"),
 	}
 
 	log.Info(
