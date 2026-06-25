@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,12 +19,17 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
-		log.Fatal(err)
+	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+
+	if err := run(log); err != nil {
+		slog.Error("node terminated", "err", err)
+		os.Exit(1)
 	}
 }
 
-func run() error {
+func run(log *slog.Logger) error {
 	cfg := struct {
 		Beneficiary       string `conf:"default:beneficiary"`
 		NameServiceFolder string `conf:"default:zblock/accounts"`
@@ -41,38 +46,51 @@ func run() error {
 		return fmt.Errorf("parsing config: %w", err)
 	}
 
-	evHandler := func(v string, args ...any) {
-		s := fmt.Sprintf(v, args...)
-		log.Println(s)
-	}
+	log.Info(
+		"config loaded",
+		"beneficiary", cfg.Beneficiary,
+		"name_service_folder", cfg.NameServiceFolder,
+		"select_strategy", cfg.SelectStrategy,
+	)
 
-	evHandler("node: starting")
+	evHandler := func(v string, args ...any) {
+		log.Debug("blockchain event", "msg", fmt.Sprintf(v, args...))
+	}
 
 	genesis, err := core.LoadGenesis()
 	if err != nil {
-		return err
+		return fmt.Errorf("loading genesis: %w", err)
 	}
+
+	log.Info("genesis loaded")
 
 	beneficiaryPath := fmt.Sprintf("%s/%s.ecdsa", cfg.NameServiceFolder, cfg.Beneficiary)
 	beneficiaryPrivateKey, err := crypto.LoadECDSA(beneficiaryPath)
 	if err != nil {
-		return fmt.Errorf("unable to load beneficiary private key: %w", err)
+		return fmt.Errorf("loading beneficiary private key [%s]: %w", beneficiaryPath, err)
 	}
 
+	beneficiaryAddress := crypto.PubkeyToAddress(beneficiaryPrivateKey.PublicKey)
+	log.Info("beneficiary key loaded", "address", beneficiaryAddress.Hex())
+
 	state, err := state.NewState(state.StateConfig{
-		Beneficiary:    crypto.PubkeyToAddress(beneficiaryPrivateKey.PublicKey),
+		Beneficiary:    beneficiaryAddress,
 		Genesis:        genesis,
 		EvHandler:      evHandler,
 		SelectStrategy: cfg.SelectStrategy,
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("initializing state: %w", err)
 	}
-	defer state.Shutdown()
+	defer func() {
+		log.Info("shutting down state")
+		_ = state.Shutdown()
+	}()
+
+	log.Info("state initialized")
 
 	sigint := make(chan os.Signal, 1)
 	signal.Notify(sigint, os.Interrupt)
-
 	serverError := make(chan error, 1)
 
 	publicHandler := public.NewServer(state)
@@ -84,7 +102,11 @@ func run() error {
 		IdleTimeout:  time.Minute,
 	}
 	go func() {
-		serverError <- publicServer.ListenAndServe()
+		log.Info("public server starting", "addr", publicServer.Addr)
+		if err := publicServer.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			log.Error("public server failed", "err", err)
+			serverError <- err
+		}
 	}()
 
 	privateHandler := private.NewServer(state)
@@ -96,21 +118,33 @@ func run() error {
 		IdleTimeout:  time.Minute,
 	}
 	go func() {
-		serverError <- privateServer.ListenAndServe()
+		log.Info("private server starting", "addr", privateServer.Addr)
+		if err := privateServer.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			log.Error("private server failed", "err", err)
+			serverError <- err
+		}
 	}()
 
 	select {
 	case err := <-serverError:
 		return fmt.Errorf("server error: %w", err)
 	case <-sigint:
-		if err := publicServer.Shutdown(context.Background()); err != nil {
+		log.Info("shutdown signal received, draining connections")
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := publicServer.Shutdown(ctx); err != nil {
 			return fmt.Errorf("could not shutdown public server gracefully: %w", err)
 		}
+		log.Info("public server stopped")
 
-		if err := privateServer.Shutdown(context.Background()); err != nil {
+		if err := privateServer.Shutdown(ctx); err != nil {
 			return fmt.Errorf("could not shutdown private server gracefully: %w", err)
 		}
+		log.Info("private server stopped")
 	}
 
+	log.Info("node shutdown complete")
 	return nil
 }
