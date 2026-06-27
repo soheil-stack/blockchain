@@ -59,7 +59,11 @@ func (m *Mempool) Truncate() {
 	m.Transactions = make(map[string]core.Transaction)
 }
 
-func (m *Mempool) PickBest(n int) []core.Transaction {
+func (m *Mempool) PickBest(n ...int) []core.Transaction {
+	number := len(m.Transactions)
+	if len(n) > 0 {
+		number = n[0]
+	}
 	m.mu.RLock()
 	accountTxs := make(map[common.Address][]core.Transaction)
 	for _, tx := range m.Transactions {
@@ -67,7 +71,7 @@ func (m *Mempool) PickBest(n int) []core.Transaction {
 	}
 	m.mu.RUnlock()
 
-	return m.selectorFn(accountTxs, n)
+	return m.selectorFn(accountTxs, number)
 }
 
 func txKey(tx core.Transaction) string {

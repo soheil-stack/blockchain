@@ -21,8 +21,9 @@ func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	}))
+	slog.SetDefault(log)
 
-	if err := run(log); err != nil {
+	if err := run(); err != nil {
 		slog.Error("node terminated", "err", err)
 		os.Exit(1)
 	}
@@ -35,7 +36,7 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-func run(log *slog.Logger) error {
+func run() error {
 	cfg := struct {
 		Beneficiary       string
 		NameServiceFolder string
@@ -46,7 +47,7 @@ func run(log *slog.Logger) error {
 		SelectStrategy:    getEnv("SELECT_STRATEGY", "tip"),
 	}
 
-	log.Info(
+	slog.Info(
 		"config loaded",
 		"beneficiary", cfg.Beneficiary,
 		"name_service_folder", cfg.NameServiceFolder,
@@ -54,7 +55,7 @@ func run(log *slog.Logger) error {
 	)
 
 	evHandler := func(v string, args ...any) {
-		log.Debug("blockchain event", "msg", fmt.Sprintf(v, args...))
+		slog.Debug("blockchain event", "msg", fmt.Sprintf(v, args...))
 	}
 
 	genesis, err := core.LoadGenesis()
@@ -62,7 +63,7 @@ func run(log *slog.Logger) error {
 		return fmt.Errorf("loading genesis: %w", err)
 	}
 
-	log.Info("genesis loaded")
+	slog.Info("genesis loaded")
 
 	beneficiaryPath := fmt.Sprintf("%s/%s.ecdsa", cfg.NameServiceFolder, cfg.Beneficiary)
 	beneficiaryPrivateKey, err := crypto.LoadECDSA(beneficiaryPath)
@@ -71,7 +72,7 @@ func run(log *slog.Logger) error {
 	}
 
 	beneficiaryAddress := crypto.PubkeyToAddress(beneficiaryPrivateKey.PublicKey)
-	log.Info("beneficiary key loaded", "address", beneficiaryAddress.Hex())
+	slog.Info("beneficiary key loaded", "address", beneficiaryAddress.Hex())
 
 	state, err := state.NewState(state.StateConfig{
 		Beneficiary:    beneficiaryAddress,
@@ -83,17 +84,23 @@ func run(log *slog.Logger) error {
 		return fmt.Errorf("initializing state: %w", err)
 	}
 	defer func() {
-		log.Info("shutting down state")
+		slog.Info("shutting down state")
 		_ = state.Shutdown()
 	}()
 
-	log.Info("state initialized")
+	slog.Info("state initialized")
+
+	ns, err := core.NewNameService(cfg.NameServiceFolder)
+	if err != nil {
+		return fmt.Errorf("initializing name service: %w", err)
+	}
+	slog.Info("name service initialized")
 
 	sigint := make(chan os.Signal, 1)
 	signal.Notify(sigint, os.Interrupt)
 	serverError := make(chan error, 1)
 
-	publicHandler := public.NewServer(state)
+	publicHandler := public.NewServer(state, ns)
 	publicServer := http.Server{
 		Addr:         ":8080",
 		Handler:      publicHandler,
@@ -102,9 +109,9 @@ func run(log *slog.Logger) error {
 		IdleTimeout:  time.Minute,
 	}
 	go func() {
-		log.Info("public server starting", "addr", publicServer.Addr)
+		slog.Info("public server starting", "addr", publicServer.Addr)
 		if err := publicServer.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-			log.Error("public server failed", "err", err)
+			slog.Error("public server failed", "err", err)
 			serverError <- err
 		}
 	}()
@@ -118,9 +125,9 @@ func run(log *slog.Logger) error {
 		IdleTimeout:  time.Minute,
 	}
 	go func() {
-		log.Info("private server starting", "addr", privateServer.Addr)
+		slog.Info("private server starting", "addr", privateServer.Addr)
 		if err := privateServer.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-			log.Error("private server failed", "err", err)
+			slog.Error("private server failed", "err", err)
 			serverError <- err
 		}
 	}()
@@ -129,7 +136,7 @@ func run(log *slog.Logger) error {
 	case err := <-serverError:
 		return fmt.Errorf("server error: %w", err)
 	case <-sigint:
-		log.Info("shutdown signal received, draining connections")
+		slog.Info("shutdown signal received, draining connections")
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -137,14 +144,14 @@ func run(log *slog.Logger) error {
 		if err := publicServer.Shutdown(ctx); err != nil {
 			return fmt.Errorf("could not shutdown public server gracefully: %w", err)
 		}
-		log.Info("public server stopped")
+		slog.Info("public server stopped")
 
 		if err := privateServer.Shutdown(ctx); err != nil {
 			return fmt.Errorf("could not shutdown private server gracefully: %w", err)
 		}
-		log.Info("private server stopped")
+		slog.Info("private server stopped")
 	}
 
-	log.Info("node shutdown complete")
+	slog.Info("node shutdown complete")
 	return nil
 }

@@ -2,8 +2,11 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
+	"log/slog"
 	"net/http"
 )
 
@@ -19,6 +22,8 @@ func Decode[T any](r *http.Request) (T, error) {
 		if err := xml.NewDecoder(r.Body).Decode(&v); err != nil {
 			return v, err
 		}
+	default:
+		return v, errors.New("unsupported content type")
 	}
 
 	return v, nil
@@ -27,14 +32,28 @@ func Decode[T any](r *http.Request) (T, error) {
 func Encode(w http.ResponseWriter, r *http.Request, v any) error {
 	mimeType := r.Header.Get("Accept")
 
-	w.Header().Set("Content-Type", mimeType)
-	w.WriteHeader(http.StatusOK)
+	switch mimeType {
+	case "application/json", "application/xml":
+	default:
+		mimeType = "application/json"
+	}
 
+	buf := new(bytes.Buffer)
 	switch mimeType {
 	case "application/json":
-		_ = json.NewEncoder(w).Encode(v)
+		if err := json.NewEncoder(buf).Encode(v); err != nil {
+			return err
+		}
 	case "application/xml":
-		_ = xml.NewEncoder(w).Encode(v)
+		if err := xml.NewEncoder(buf).Encode(v); err != nil {
+			return err
+		}
+	}
+
+	w.Header().Set("Content-Type", mimeType)
+	w.WriteHeader(http.StatusOK)
+	if _, err := buf.WriteTo(w); err != nil {
+		slog.Error("failed to write response", "err", err, "path", r.URL.Path)
 	}
 
 	return nil

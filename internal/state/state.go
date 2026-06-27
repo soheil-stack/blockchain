@@ -53,3 +53,25 @@ func (state *State) Shutdown() error {
 func (state *State) Genesis() core.Genesis {
 	return state.genesis
 }
+
+func (state *State) Accounts() map[common.Address]core.Account {
+	return state.db.Copy()
+}
+
+func (state *State) Account(address common.Address) (core.Account, bool) {
+	return state.db.Query(address)
+}
+
+func (state *State) Mempool() []core.Transaction {
+	return state.mempool.PickBest()
+}
+
+func (state *State) UpsertTransaction(tx core.Transaction) error {
+	if err := tx.Verify(state.genesis.ChainID); err != nil {
+		return err
+	}
+
+	// TODO: update GasPrice and GasUnits
+
+	return state.mempool.Upsert(tx)
+}

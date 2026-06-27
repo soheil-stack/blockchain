@@ -12,7 +12,7 @@ func NewServer(s *state.State) http.Handler {
 	mux := http.NewServeMux()
 
 	var handler http.Handler = mux
-	handler = middleware.LoggerMiddleware(handler, nil)
+	handler = middleware.LoggerMiddleware(handler)
 
 	return handler
 }

@@ -104,36 +104,36 @@ func (tx *Transaction) Signature() ([]byte, error) {
 	return sig, nil
 }
 
-func (tx *Transaction) Verify(chainID uint64) (bool, error) {
+func (tx *Transaction) Verify(chainID uint64) error {
 	signature, err := tx.Signature()
 	if err != nil {
-		return false, err
+		return err
 	}
 
 	if tx.ChainID != chainID {
-		return false, errors.New("chainID is invalid")
+		return errors.New("chainID is invalid")
 	}
 
 	if tx.From == tx.To {
-		return false, errors.New("sending money to yourself")
+		return errors.New("sending money to yourself")
 	}
 
 	if !crypto.ValidateSignatureValues(byte(tx.V.Uint64()), tx.R, tx.S, false) {
-		return false, errors.New("signature is invalid")
+		return errors.New("signature is invalid")
 	}
 
 	txHash := tx.SigHash()
 
 	pubkey, err := crypto.SigToPub(txHash[:], signature)
 	if err != nil {
-		return false, err
+		return err
 	}
 
 	if tx.From != crypto.PubkeyToAddress(*pubkey) {
-		return false, errors.New("signature address doesn't match from address")
+		return errors.New("signature address doesn't match from address")
 	}
 
-	return true, nil
+	return nil
 }
 
 func (tx *Transaction) Hash() [32]byte {
