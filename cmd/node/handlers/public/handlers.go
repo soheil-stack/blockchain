@@ -53,8 +53,8 @@ func GetAccount(s *state.State, ns *core.NameService) http.Handler {
 func GetMempoolTransactions(s *state.State, ns *core.NameService) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		sender := common.HexToAddress(q.Get("sender"))
-		receiver := common.HexToAddress(q.Get("receiver"))
+		from := common.HexToAddress(q.Get("from"))
+		to := common.HexToAddress(q.Get("to"))
 		zeroAddress := common.Address{}
 
 		mempool := s.Mempool()
@@ -62,11 +62,11 @@ func GetMempoolTransactions(s *state.State, ns *core.NameService) http.Handler {
 		response := make([]TransactionResponse, 0)
 		for _, tx := range mempool {
 
-			if sender != zeroAddress && tx.From != sender {
+			if from != zeroAddress && tx.From != from {
 				continue
 			}
 
-			if receiver != zeroAddress && tx.To != receiver {
+			if to != zeroAddress && tx.To != to {
 				continue
 			}
 
