@@ -136,7 +136,7 @@ func (tx *Transaction) Verify(chainID uint64) error {
 	return nil
 }
 
-func (tx *Transaction) Hash() [32]byte {
+func (tx *Transaction) Hash() common.Hash {
 	data, err := json.Marshal(tx)
 	if err != nil {
 		return common.Hash{}

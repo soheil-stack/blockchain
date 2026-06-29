@@ -3,30 +3,32 @@ package core
 import (
 	"crypto/sha256"
 	"slices"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 type Content interface {
-	Hash() [32]byte
+	Hash() common.Hash
 }
 
-type Node struct {
-	Tree    *MerkleTree
-	Parent  *Node
-	Left    *Node
-	Right   *Node
-	Hash    [32]byte
+type Node[T Content] struct {
+	Tree    *MerkleTree[T]
+	Parent  *Node[T]
+	Left    *Node[T]
+	Right   *Node[T]
+	Hash    common.Hash
 	Content Content
 	leaf    bool
 	dup     bool
 }
 
-type MerkleTree struct {
-	Root   *Node
-	Leaves []*Node
+type MerkleTree[T Content] struct {
+	Root   *Node[T]
+	Leaves []*Node[T]
 }
 
-func NewMarkleTree(contents []Content) *MerkleTree {
-	tree := &MerkleTree{}
+func NewMarkleTree[T Content](contents []T) *MerkleTree[T] {
+	tree := &MerkleTree[T]{}
 
 	root, leaves := buildWithContent(contents, tree)
 
@@ -36,11 +38,11 @@ func NewMarkleTree(contents []Content) *MerkleTree {
 	return tree
 }
 
-func (tree *MerkleTree) MerkleRoot() [32]byte {
+func (tree *MerkleTree[T]) MerkleRoot() common.Hash {
 	return tree.Root.Hash
 }
 
-func (tree *MerkleTree) GetMerklePath(content Content) ([][32]byte, []int) {
+func (tree *MerkleTree[T]) GetMerklePath(content Content) ([]common.Hash, []int) {
 	contentHash := content.Hash()
 	for _, current := range tree.Leaves {
 		if current.Hash != contentHash {
@@ -48,7 +50,7 @@ func (tree *MerkleTree) GetMerklePath(content Content) ([][32]byte, []int) {
 		}
 
 		currentParent := current.Parent
-		var merklePath [][32]byte
+		var merklePath []common.Hash
 		var index []int
 		for currentParent != nil {
 			if currentParent.Left.Hash == current.Hash {
@@ -68,11 +70,11 @@ func (tree *MerkleTree) GetMerklePath(content Content) ([][32]byte, []int) {
 	return nil, nil
 }
 
-func buildWithContent(contents []Content, tree *MerkleTree) (*Node, []*Node) {
-	var leaves []*Node
+func buildWithContent[T Content](contents []T, tree *MerkleTree[T]) (*Node[T], []*Node[T]) {
+	var leaves []*Node[T]
 	for _, content := range contents {
 		hash := content.Hash()
-		leaves = append(leaves, &Node{
+		leaves = append(leaves, &Node[T]{
 			Tree:    tree,
 			Hash:    hash,
 			Content: content,
@@ -81,7 +83,7 @@ func buildWithContent(contents []Content, tree *MerkleTree) (*Node, []*Node) {
 	}
 
 	if len(leaves)%2 == 1 {
-		leaves = append(leaves, &Node{
+		leaves = append(leaves, &Node[T]{
 			Tree:    tree,
 			Hash:    leaves[len(leaves)-1].Hash,
 			Content: leaves[len(leaves)-1].Content,
@@ -95,15 +97,15 @@ func buildWithContent(contents []Content, tree *MerkleTree) (*Node, []*Node) {
 	return root, leaves
 }
 
-func buildIntermediate(nl []*Node, tree *MerkleTree) *Node {
-	var nodes []*Node
+func buildIntermediate[T Content](nl []*Node[T], tree *MerkleTree[T]) *Node[T] {
+	var nodes []*Node[T]
 	for i := 0; i < len(nl); i += 2 {
 		left, right := i, i+1
 		if right == len(nl) {
 			right = left
 		}
 
-		node := &Node{
+		node := &Node[T]{
 			Tree:  tree,
 			Left:  nl[left],
 			Right: nl[right],
