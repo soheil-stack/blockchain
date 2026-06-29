@@ -5,11 +5,11 @@ import (
 	"net/http"
 
 	"github.com/soheil-stack/blockchain/cmd/node/handlers/middleware"
-	"github.com/soheil-stack/blockchain/internal/core"
+	"github.com/soheil-stack/blockchain/internal/nameservice"
 	"github.com/soheil-stack/blockchain/internal/state"
 )
 
-func NewServer(s *state.State, ns *core.NameService) http.Handler {
+func NewServer(s *state.State, ns *nameservice.NameService) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.Handle("GET /genesis", GetGenesis(s))

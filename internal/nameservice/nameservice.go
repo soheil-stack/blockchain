@@ -1,4 +1,5 @@
-package core
+// Package nameservice
+package nameservice
 
 import (
 	"io/fs"
@@ -15,7 +16,7 @@ type NameService struct {
 	accounts map[common.Address]string
 }
 
-func NewNameService(root string) (*NameService, error) {
+func New(root string) (*NameService, error) {
 	accounts := make(map[common.Address]string)
 
 	fn := func(file string, info fs.FileInfo, err error) error {

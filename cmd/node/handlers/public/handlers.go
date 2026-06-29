@@ -6,6 +6,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/soheil-stack/blockchain/cmd/node/handlers"
 	"github.com/soheil-stack/blockchain/internal/core"
+	"github.com/soheil-stack/blockchain/internal/nameservice"
 	"github.com/soheil-stack/blockchain/internal/state"
 )
 
@@ -18,7 +19,7 @@ func GetGenesis(s *state.State) http.Handler {
 	})
 }
 
-func GetAccounts(s *state.State, ns *core.NameService) http.Handler {
+func GetAccounts(s *state.State, ns *nameservice.NameService) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		accounts := s.Accounts()
 
@@ -33,7 +34,7 @@ func GetAccounts(s *state.State, ns *core.NameService) http.Handler {
 	})
 }
 
-func GetAccount(s *state.State, ns *core.NameService) http.Handler {
+func GetAccount(s *state.State, ns *nameservice.NameService) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		address := common.HexToAddress(r.PathValue("address"))
 		account, ok := s.Account(address)
@@ -50,7 +51,7 @@ func GetAccount(s *state.State, ns *core.NameService) http.Handler {
 	})
 }
 
-func GetMempoolTransactions(s *state.State, ns *core.NameService) http.Handler {
+func GetMempoolTransactions(s *state.State, ns *nameservice.NameService) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		from := common.HexToAddress(q.Get("from"))

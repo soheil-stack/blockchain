@@ -3,6 +3,7 @@ package public
 import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/soheil-stack/blockchain/internal/core"
+	"github.com/soheil-stack/blockchain/internal/nameservice"
 )
 
 type AccountResponse struct {
@@ -12,7 +13,7 @@ type AccountResponse struct {
 	Nonce   uint64         `json:"nonce"`
 }
 
-func toAccountResponse(ns *core.NameService, account core.Account) AccountResponse {
+func toAccountResponse(ns *nameservice.NameService, account core.Account) AccountResponse {
 	return AccountResponse{
 		Address: account.Address,
 		Name:    ns.Get(account.Address),
@@ -36,7 +37,7 @@ type TransactionResponse struct {
 	GasUnits    uint64         `json:"gasUnits"`
 }
 
-func toTransactionResponse(ns *core.NameService, tx core.Transaction) (TransactionResponse, error) {
+func toTransactionResponse(ns *nameservice.NameService, tx core.Transaction) (TransactionResponse, error) {
 	sig, err := tx.Signature()
 	if err != nil {
 		return TransactionResponse{}, err

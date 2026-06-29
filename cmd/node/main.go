@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"github.com/soheil-stack/blockchain/cmd/node/handlers/private"
 	"github.com/soheil-stack/blockchain/cmd/node/handlers/public"
 	"github.com/soheil-stack/blockchain/internal/core"
+	"github.com/soheil-stack/blockchain/internal/nameservice"
 	"github.com/soheil-stack/blockchain/internal/state"
 )
 
@@ -58,7 +60,7 @@ func run() error {
 		slog.Debug("blockchain event", "msg", fmt.Sprintf(v, args...))
 	}
 
-	genesis, err := core.LoadGenesis()
+	genesis, err := loadGenesis()
 	if err != nil {
 		return fmt.Errorf("loading genesis: %w", err)
 	}
@@ -90,7 +92,7 @@ func run() error {
 
 	slog.Info("state initialized")
 
-	ns, err := core.NewNameService(cfg.NameServiceFolder)
+	ns, err := nameservice.New(cfg.NameServiceFolder)
 	if err != nil {
 		return fmt.Errorf("initializing name service: %w", err)
 	}
@@ -154,4 +156,20 @@ func run() error {
 
 	slog.Info("node shutdown complete")
 	return nil
+}
+
+func loadGenesis() (core.Genesis, error) {
+	var genesis core.Genesis
+
+	data, err := os.ReadFile("zblock/genesis.json")
+	if err != nil {
+		return core.Genesis{}, err
+	}
+
+	err = json.Unmarshal(data, &genesis)
+	if err != nil {
+		return core.Genesis{}, err
+	}
+
+	return genesis, nil
 }
