@@ -76,7 +76,7 @@ func run() error {
 	beneficiaryAddress := crypto.PubkeyToAddress(beneficiaryPrivateKey.PublicKey)
 	slog.Info("beneficiary key loaded", "address", beneficiaryAddress.Hex())
 
-	state, err := state.NewState(state.StateConfig{
+	st, err := state.NewState(state.StateConfig{
 		Beneficiary:    beneficiaryAddress,
 		Genesis:        genesis,
 		EvHandler:      evHandler,
@@ -87,10 +87,12 @@ func run() error {
 	}
 	defer func() {
 		slog.Info("shutting down state")
-		_ = state.Shutdown()
+		_ = st.Shutdown()
 	}()
 
 	slog.Info("state initialized")
+
+	state.RunWorker(st, evHandler)
 
 	ns, err := nameservice.New(cfg.NameServiceFolder)
 	if err != nil {
@@ -102,7 +104,7 @@ func run() error {
 	signal.Notify(sigint, os.Interrupt)
 	serverError := make(chan error, 1)
 
-	publicHandler := public.NewServer(state, ns)
+	publicHandler := public.NewServer(st, ns)
 	publicServer := http.Server{
 		Addr:         ":8080",
 		Handler:      publicHandler,
@@ -118,7 +120,7 @@ func run() error {
 		}
 	}()
 
-	privateHandler := private.NewServer(state)
+	privateHandler := private.NewServer(st)
 	privateServer := http.Server{
 		Addr:         ":8081",
 		Handler:      privateHandler,

@@ -30,13 +30,13 @@ type BlockConfig struct {
 	MiningReward uint64
 	PrevBlock    Block
 	StateRoot    common.Hash
-	Transactions []*Transaction
+	Transactions []Transaction
 	EvHandler    EventHandler
 }
 
 type Block struct {
-	Header       BlockHeader    `json:"header"`
-	Transactions []*Transaction `json:"transactions"`
+	Header       BlockHeader   `json:"header"`
+	Transactions []Transaction `json:"transactions"`
 }
 
 func NewBlock(ctx context.Context, config BlockConfig) (Block, error) {

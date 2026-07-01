@@ -136,11 +136,15 @@ func (tx *Transaction) Verify(chainID uint64) error {
 	return nil
 }
 
-func (tx *Transaction) Hash() common.Hash {
+func (tx Transaction) Hash() common.Hash {
 	data, err := json.Marshal(tx)
 	if err != nil {
 		return common.Hash{}
 	}
 
 	return sha256.Sum256(data)
+}
+
+func (tx Transaction) String() string {
+	return fmt.Sprintf("%s:%d", tx.From, tx.Nonce)
 }

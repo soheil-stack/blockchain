@@ -2,6 +2,9 @@
 package state
 
 import (
+	"context"
+	"errors"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/soheil-stack/blockchain/internal/core"
 )
@@ -9,7 +12,7 @@ import (
 type StateConfig struct {
 	Beneficiary    common.Address
 	Genesis        core.Genesis
-	EvHandler      EventHandler
+	EvHandler      core.EventHandler
 	SelectStrategy string
 }
 
@@ -18,8 +21,11 @@ type State struct {
 	genesis     core.Genesis
 	db          *Database
 	mempool     *Mempool
-	evHandler   EventHandler
+	evHandler   core.EventHandler
+	Worker      *Worker
 }
+
+var ErrMempoolIsEmpty = errors.New("no transaction in the mempool")
 
 func NewState(config StateConfig) (*State, error) {
 	evHandler := func(v string, args ...any) {
@@ -47,6 +53,8 @@ func (state *State) Shutdown() error {
 	state.evHandler("state: shutdown started")
 	defer state.evHandler("state: shutdown finished")
 
+	state.Worker.Shutdown()
+
 	return nil
 }
 
@@ -62,8 +70,16 @@ func (state *State) Account(address common.Address) (core.Account, bool) {
 	return state.db.Query(address)
 }
 
-func (state *State) Mempool() []core.Transaction {
-	return state.mempool.PickBest()
+func (state *State) MempoolPickBest(n ...int) []core.Transaction {
+	return state.mempool.PickBest(n...)
+}
+
+func (state *State) MempoolUpsert(tx core.Transaction) error {
+	return state.mempool.Upsert(tx)
+}
+
+func (state *State) MempoolLength() int {
+	return state.mempool.Length()
 }
 
 func (state *State) UpsertTransaction(tx core.Transaction) error {
@@ -73,5 +89,38 @@ func (state *State) UpsertTransaction(tx core.Transaction) error {
 
 	// TODO: update GasPrice and GasUnits
 
-	return state.mempool.Upsert(tx)
+	if err := state.MempoolUpsert(tx); err != nil {
+		return err
+	}
+
+	state.Worker.SignalStartMining()
+
+	return nil
+}
+
+func (state *State) MineNewBlock(ctx context.Context) (core.Block, error) {
+	defer state.evHandler("state: MineNewBlock: MINING: completed")
+
+	state.evHandler("state: MineNewBlock: MINING: check mempool count")
+
+	if state.MempoolLength() == 0 {
+		return core.Block{}, ErrMempoolIsEmpty
+	}
+
+	transactions := state.MempoolPickBest(int(state.genesis.TransactionPerBlock))
+
+	block, err := core.NewBlock(ctx, core.BlockConfig{
+		Beneficiary:  state.beneficiary,
+		Difficulty:   state.genesis.Difficulty,
+		MiningReward: state.genesis.MiningReward,
+		PrevBlock:    state.db.LatestBlock(),
+		StateRoot:    state.db.HashState(),
+		Transactions: transactions,
+		EvHandler:    state.evHandler,
+	})
+	if err != nil {
+		return core.Block{}, err
+	}
+
+	return block, nil
 }

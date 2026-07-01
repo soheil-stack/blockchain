@@ -27,6 +27,13 @@ func NewMempool(strategy string) (*Mempool, error) {
 	}, nil
 }
 
+func (m *Mempool) Length() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return len(m.Transactions)
+}
+
 func (m *Mempool) Upsert(tx core.Transaction) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

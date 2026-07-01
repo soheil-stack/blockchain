@@ -58,7 +58,7 @@ func GetMempoolTransactions(s *state.State, ns *nameservice.NameService) http.Ha
 		to := common.HexToAddress(q.Get("to"))
 		zeroAddress := common.Address{}
 
-		mempool := s.Mempool()
+		mempool := s.MempoolPickBest()
 
 		response := make([]TransactionResponse, 0)
 		for _, tx := range mempool {
@@ -96,6 +96,7 @@ func PostTransaction(s *state.State) http.Handler {
 		err = s.UpsertTransaction(tx)
 		if err != nil {
 			http.Error(w, "failed to post transaction", http.StatusInternalServerError)
+			return
 		}
 
 		response := struct {

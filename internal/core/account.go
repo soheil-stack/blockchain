@@ -14,3 +14,17 @@ func NewAccount(address common.Address, balance uint64) Account {
 		Balance: balance,
 	}
 }
+
+type ByAccount []Account
+
+func (ba ByAccount) Len() int {
+	return len(ba)
+}
+
+func (ba ByAccount) Less(i, j int) bool {
+	return ba[i].Address.Hex() < ba[j].Address.Hex()
+}
+
+func (ba ByAccount) Swap(i, j int) {
+	ba[i], ba[j] = ba[j], ba[i]
+}
