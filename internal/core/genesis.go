@@ -1,8 +1,13 @@
 package core
 
 import (
+	_ "embed"
+	"encoding/json"
 	"time"
 )
+
+//go:embed data/genesis.json
+var genesisBytes []byte
 
 type Genesis struct {
 	Date                time.Time         `json:"date"`
@@ -12,4 +17,15 @@ type Genesis struct {
 	MiningReward        uint64            `json:"miningReward"`
 	GasPrice            uint64            `json:"gasPrice"`
 	Balances            map[string]uint64 `json:"balances"`
+}
+
+func LoadGenesis() (Genesis, error) {
+	var genesis Genesis
+
+	err := json.Unmarshal(genesisBytes, &genesis)
+	if err != nil {
+		return Genesis{}, err
+	}
+
+	return genesis, nil
 }

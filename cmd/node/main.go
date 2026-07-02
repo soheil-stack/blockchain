@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -60,7 +59,7 @@ func run() error {
 		slog.Debug("blockchain event", "msg", fmt.Sprintf(v, args...))
 	}
 
-	genesis, err := loadGenesis()
+	genesis, err := core.LoadGenesis()
 	if err != nil {
 		return fmt.Errorf("loading genesis: %w", err)
 	}
@@ -158,20 +157,4 @@ func run() error {
 
 	slog.Info("node shutdown complete")
 	return nil
-}
-
-func loadGenesis() (core.Genesis, error) {
-	var genesis core.Genesis
-
-	data, err := os.ReadFile("zblock/genesis.json")
-	if err != nil {
-		return core.Genesis{}, err
-	}
-
-	err = json.Unmarshal(data, &genesis)
-	if err != nil {
-		return core.Genesis{}, err
-	}
-
-	return genesis, nil
 }
