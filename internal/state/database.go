@@ -14,7 +14,7 @@ import (
 
 type Storage interface {
 	Write(block core.Block) error
-	GetBlock(number int) (core.Block, error)
+	GetBlock(number uint64) (core.Block, error)
 	ForEach() Iterator
 	Close() error
 	Reset() error
@@ -29,20 +29,61 @@ type Database struct {
 	mu          sync.RWMutex
 	accounts    map[common.Address]core.Account
 	latestBlock core.Block
+	genesis     core.Genesis
 	storage     Storage
 }
 
-func NewDatabase(genesis core.Genesis, evHandler core.EventHandler) *Database {
+func NewDatabase(genesis core.Genesis, storage Storage, evHandler core.EventHandler) (*Database, error) {
 	db := Database{
 		accounts: make(map[common.Address]core.Account),
+		genesis:  genesis,
+		storage:  storage,
 	}
 
-	for addressHex, balance := range genesis.Balances {
-		address := common.HexToAddress(addressHex)
+	for address, balance := range genesis.Balances {
 		db.accounts[address] = core.NewAccount(address, balance)
 	}
 
-	return &db
+	iter := storage.ForEach()
+	for block, err := iter.Next(); !iter.Done(); block, err = iter.Next() {
+		if err != nil {
+			return nil, err
+		}
+
+		if err := block.Validate(db.LatestBlock(), db.HashState(), evHandler); err != nil {
+			return nil, err
+		}
+
+		for _, tx := range block.Transactions {
+			_ = db.ApplyTransaction(block, tx)
+		}
+
+		db.ApplyMiningReward(block)
+		db.SetLatestBlock(block)
+	}
+
+	return &db, nil
+}
+
+func (db *Database) Close() {
+	_ = db.storage.Close()
+}
+
+func (db *Database) Reset() error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	err := db.storage.Reset()
+	if err != nil {
+		return err
+	}
+
+	db.accounts = make(map[common.Address]core.Account)
+	for address, balance := range db.genesis.Balances {
+		db.accounts[address] = core.NewAccount(address, balance)
+	}
+
+	return nil
 }
 
 func (db *Database) Remove(address common.Address) {

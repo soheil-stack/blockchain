@@ -16,6 +16,7 @@ import (
 	"github.com/soheil-stack/blockchain/internal/core"
 	"github.com/soheil-stack/blockchain/internal/nameservice"
 	"github.com/soheil-stack/blockchain/internal/state"
+	"github.com/soheil-stack/blockchain/internal/storage"
 )
 
 func main() {
@@ -41,10 +42,12 @@ func run() error {
 	cfg := struct {
 		Beneficiary       string
 		NameServiceFolder string
+		DBPath            string
 		SelectStrategy    string
 	}{
 		Beneficiary:       getEnv("BENEFICIARY", "beneficiary"),
 		NameServiceFolder: getEnv("NAME_SERVICE_FOLDER", "zblock/accounts"),
+		DBPath:            getEnv("DB_PATH", "zblock/miner"),
 		SelectStrategy:    getEnv("SELECT_STRATEGY", "tip"),
 	}
 
@@ -75,11 +78,17 @@ func run() error {
 	beneficiaryAddress := crypto.PubkeyToAddress(beneficiaryPrivateKey.PublicKey)
 	slog.Info("beneficiary key loaded", "address", beneficiaryAddress.Hex())
 
+	diskStorage, err := storage.NewDisk(cfg.DBPath)
+	if err != nil {
+		return fmt.Errorf("initializing storage: %w", err)
+	}
+
 	st, err := state.NewState(state.StateConfig{
 		Beneficiary:    beneficiaryAddress,
 		Genesis:        genesis,
 		EvHandler:      evHandler,
 		SelectStrategy: cfg.SelectStrategy,
+		Storage:        diskStorage,
 	})
 	if err != nil {
 		return fmt.Errorf("initializing state: %w", err)

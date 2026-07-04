@@ -15,6 +15,7 @@ type StateConfig struct {
 	Genesis        core.Genesis
 	EvHandler      core.EventHandler
 	SelectStrategy string
+	Storage        Storage
 }
 
 type State struct {
@@ -36,7 +37,11 @@ func NewState(config StateConfig) (*State, error) {
 		}
 	}
 
-	db := NewDatabase(config.Genesis, evHandler)
+	db, err := NewDatabase(config.Genesis, config.Storage, evHandler)
+	if err != nil {
+		return nil, err
+	}
+
 	mempool, err := NewMempool(config.SelectStrategy)
 	if err != nil {
 		return nil, err
