@@ -149,7 +149,7 @@ func (worker *Worker) runPowOperation() {
 			case ctx.Err() != nil:
 				worker.evHandler("worker: runPowOperation: MINING: CANCEL: completed")
 			default:
-				worker.evHandler("worker: runPowOperation: MINING: ERROR: %w", err)
+				worker.evHandler("worker: runPowOperation: MINING: ERROR: %s", err)
 			}
 
 			return

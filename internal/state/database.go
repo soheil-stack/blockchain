@@ -78,6 +78,8 @@ func (db *Database) Reset() error {
 		return err
 	}
 
+	db.latestBlock = core.Block{}
+
 	db.accounts = make(map[common.Address]core.Account)
 	for address, balance := range db.genesis.Balances {
 		db.accounts[address] = core.NewAccount(address, balance)

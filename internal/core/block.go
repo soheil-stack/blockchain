@@ -129,7 +129,7 @@ func (block Block) Validate(previousBlock Block, stateRoot common.Hash, evHandle
 	return nil
 }
 
-func (block Block) performPOW(ctx context.Context, ev EventHandler) error {
+func (block *Block) performPOW(ctx context.Context, ev EventHandler) error {
 	ev("block: Perfrom POW: MINING: started")
 	defer ev("block: Perfrom POW: MINING: completed")
 
@@ -166,6 +166,10 @@ func (block Block) performPOW(ctx context.Context, ev EventHandler) error {
 }
 
 func (block Block) Hash() common.Hash {
+	if block.Header.Number == 0 {
+		return common.Hash{}
+	}
+
 	data, err := json.Marshal(block.Header)
 	if err != nil {
 		return common.Hash{}
