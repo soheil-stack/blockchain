@@ -4,6 +4,7 @@ package state
 import (
 	"context"
 	"errors"
+	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/soheil-stack/blockchain/internal/core"
@@ -22,6 +23,7 @@ type State struct {
 	db          *Database
 	mempool     *Mempool
 	evHandler   core.EventHandler
+	mu          sync.RWMutex
 	Worker      *Worker
 }
 
@@ -122,5 +124,46 @@ func (state *State) MineNewBlock(ctx context.Context) (core.Block, error) {
 		return core.Block{}, err
 	}
 
+	if err := state.ValidateBlockAndUpdateDatabase(block); err != nil {
+		return core.Block{}, err
+	}
+
 	return block, nil
+}
+
+func (state *State) ValidateBlockAndUpdateDatabase(block core.Block) error {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	state.evHandler("state: ValidateBlockAndUpdateDatabase: validate block")
+
+	if err := block.Validate(state.db.LatestBlock(), state.db.HashState(), state.evHandler); err != nil {
+		return err
+	}
+
+	state.evHandler("state: ValidateBlockAndUpdateDatabase: write block")
+
+	if err := state.db.Write(block); err != nil {
+		return err
+	}
+	state.db.SetLatestBlock(block)
+
+	state.evHandler("state ValidateBlockAndUpdateDatabase: update accounts")
+
+	for _, tx := range block.Transactions {
+		state.evHandler("state: ValidateBlockAndUpdateDatabase: update accounts: tx[%s]", tx)
+
+		state.mempool.Remove(tx)
+
+		if err := state.db.ApplyTransaction(block, tx); err != nil {
+			state.evHandler("state: ValidateBlockAndUpdateDatabase: update accounts: ERROR: %w", err)
+			continue
+		}
+	}
+
+	state.evHandler("state: ValidateBlockAndUpdateDatabase: apply mining reward")
+
+	state.db.ApplyMiningReward(block)
+
+	return nil
 }

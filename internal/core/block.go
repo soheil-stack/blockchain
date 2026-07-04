@@ -4,11 +4,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"math/rand"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 )
+
+var ErrChainForked = errors.New("blockchain forked")
 
 type EventHandler func(v string, args ...any)
 
@@ -69,15 +73,71 @@ func NewBlock(ctx context.Context, config BlockConfig) (Block, error) {
 	return block, nil
 }
 
-func (b *Block) performPOW(ctx context.Context, ev EventHandler) error {
+func (block Block) Validate(previousBlock Block, stateRoot common.Hash, evHandler EventHandler) error {
+	nextNumber := previousBlock.Header.Number + 1
+
+	evHandler("block: Validate: block[%d]: check: block number is the next number", block.Header.Number)
+
+	if block.Header.Number != nextNumber {
+		return fmt.Errorf("block number[%d] is not the next number[%d]", block.Header.Number, nextNumber)
+	}
+
+	evHandler("block: Validate: block[%d]: check: chain is not forked", block.Header.Number)
+
+	if block.Header.Number >= (nextNumber + 2) {
+		return ErrChainForked
+	}
+
+	evHandler("block: Validate: block[%d]: check: block difficulty is the same or greater than parent block difficulty", block.Header.Number)
+
+	if block.Header.Difficulty < previousBlock.Header.Difficulty {
+		return fmt.Errorf("block difficulty[%d] is less than previous block difficulty[%d]", block.Header.Difficulty, previousBlock.Header.Difficulty)
+	}
+
+	evHandler("block: Validate: block[%d]: check: block hash has been solved", block.Header.Number)
+
+	hash := block.Hash()
+	if !isHashSolved(hash, block.Header.Difficulty) {
+		return fmt.Errorf("%s invalid block hash", hash)
+	}
+
+	evHandler("block: Validate: block[%d]: check: parent hash does match parent block", block.Header.Number)
+
+	if block.Header.PrevBlockHash != previousBlock.Hash() {
+		return fmt.Errorf("parent block hash[%s] does not match our known parent block hash[%s]", block.Header.PrevBlockHash, previousBlock.Hash())
+	}
+
+	evHandler("block: Validate: block[%d]: check: block's timestamp is greater than parent block's timestamp", block.Header.Number)
+
+	if block.Header.Timestamp <= previousBlock.Header.Timestamp {
+		return fmt.Errorf("block timestamp[%d] is before parent block timestamp[%d]", block.Header.Timestamp, previousBlock.Header.Timestamp)
+	}
+
+	evHandler("block: Validate: block[%d]: check: state root hash does match current database", block.Header.Number)
+
+	if block.Header.StateRoot != stateRoot {
+		return fmt.Errorf("state root hash[%s] does not match current database hash[%s]", block.Header.StateRoot, stateRoot)
+	}
+
+	evHandler("block: Validate: block[%d]: check: merkle root does match transactions", block.Header.Number)
+
+	tree := NewMarkleTree(block.Transactions)
+	if block.Header.TransactionsRoot != tree.MerkleRoot() {
+		return fmt.Errorf("merkle root[%s] does not match transactions[%s]", block.Header.TransactionsRoot, tree.MerkleRoot())
+	}
+
+	return nil
+}
+
+func (block Block) performPOW(ctx context.Context, ev EventHandler) error {
 	ev("block: Perfrom POW: MINING: started")
 	defer ev("block: Perfrom POW: MINING: completed")
 
-	for _, tx := range b.Transactions {
+	for _, tx := range block.Transactions {
 		ev("block: Perform POW: MINING: tx[%s]", tx)
 	}
 
-	b.Header.Nonce = rand.Uint64()
+	block.Header.Nonce = rand.Uint64()
 
 	ev("block PerformPOW: MINING: running")
 
@@ -93,20 +153,20 @@ func (b *Block) performPOW(ctx context.Context, ev EventHandler) error {
 			return ctx.Err()
 		}
 
-		hash := b.Hash()
-		if !isHashSolved(hash, b.Header.Difficulty) {
-			b.Header.Nonce++
+		hash := block.Hash()
+		if !isHashSolved(hash, block.Header.Difficulty) {
+			block.Header.Nonce++
 			continue
 		}
 
-		ev("block: Perform POW: MINING: SOLVED: prevBlockHash[%s]: newBlockHash[%s]", b.Header.PrevBlockHash, hash)
+		ev("block: Perform POW: MINING: SOLVED: prevBlockHash[%s]: newBlockHash[%s]", block.Header.PrevBlockHash, hash)
 
 		return nil
 	}
 }
 
-func (b Block) Hash() common.Hash {
-	data, err := json.Marshal(b.Header)
+func (block Block) Hash() common.Hash {
+	data, err := json.Marshal(block.Header)
 	if err != nil {
 		return common.Hash{}
 	}
