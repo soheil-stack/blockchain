@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/soheil-stack/blockchain/internal/core"
+	"github.com/soheil-stack/blockchain/internal/peer"
 )
 
 type Worker struct {
@@ -28,6 +29,8 @@ func RunWorker(state *State, evHandler core.EventHandler) {
 	}
 
 	state.Worker = &worker
+
+	worker.Sync()
 
 	operations := []func(){
 		worker.powOperation,
@@ -167,5 +170,58 @@ func (worker *Worker) isShutdown() bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func (worker *Worker) Sync() {
+	worker.evHandler("worker: Sync: started")
+	defer worker.evHandler("worker: Sync: completed")
+
+	for _, peer := range worker.state.KnownExternalPeers() {
+		peerStatus, err := worker.state.NetRequestPeerStatus(peer)
+		if err != nil {
+			worker.evHandler("worker: Sync: queryPeerStatus: %s: ERROR: %s", peer.Host, err)
+			continue
+		}
+
+		worker.addNewPeers(peerStatus.KnownPeers)
+
+		mempool, err := worker.state.NetRequestPeerMempool(peer)
+		if err != nil {
+			worker.evHandler("worker: Sync: retrievePeerMempool: %s: ERROR: %s", peer.Host, err)
+			continue
+		}
+
+		for _, tx := range mempool {
+			worker.evHandler("worker: Sync: retrievePeerMempool: %s: Add tx[%s]", peer.Host, tx)
+			_ = worker.state.MempoolUpsert(tx)
+		}
+
+		if peerStatus.LatestBlockNumber > worker.state.LatestBlock().Header.Number {
+			worker.evHandler("worker: Sync: retrievePeerBlocks: %s: latestBlockNumber[%d]", peer.Host, peerStatus.LatestBlockNumber)
+
+			if err := worker.state.NetRequestPeerBlocks(peer); err != nil {
+				worker.evHandler("worker: Sync: retrievePeerBlocks: %s: ERROR: %s", peer.Host, err)
+			}
+		}
+	}
+
+	if err := worker.state.NetSendNodeAvailableToPeers(); err != nil {
+		worker.evHandler("worker: Sync: sendNodeAvailableToPeers: ERROR: %s", err)
+	}
+}
+
+func (worker *Worker) addNewPeers(peers []peer.Peer) {
+	worker.evHandler("worker: runPeerUpdatesOperation: addNewPeers: started")
+	defer worker.evHandler("worker: runPeerUpdatesOperation: addNewPeers: completed")
+
+	for _, peer := range peers {
+		if peer.Match(worker.state.Host()) {
+			continue
+		}
+
+		if worker.state.AddKnownPeer(peer) {
+			worker.evHandler("worker: runPeerUpdatesOperation: addNewPeers: add peer nodes: adding peer-node %s", peer.Host)
+		}
 	}
 }

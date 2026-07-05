@@ -1,5 +1,4 @@
-// Package handlers
-package handlers
+package server
 
 import (
 	"bytes"
@@ -10,7 +9,7 @@ import (
 	"net/http"
 )
 
-func Decode[T any](r *http.Request) (T, error) {
+func decode[T any](r *http.Request) (T, error) {
 	var v T
 
 	switch r.Header.Get("Content-Type") {
@@ -29,7 +28,7 @@ func Decode[T any](r *http.Request) (T, error) {
 	return v, nil
 }
 
-func Encode(w http.ResponseWriter, r *http.Request, v any) error {
+func encode(w http.ResponseWriter, r *http.Request, v any) error {
 	mimeType := r.Header.Get("Accept")
 
 	switch mimeType {

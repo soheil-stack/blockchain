@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/soheil-stack/blockchain/cmd/node/handlers/private"
-	"github.com/soheil-stack/blockchain/cmd/node/handlers/public"
 	"github.com/soheil-stack/blockchain/internal/core"
 	"github.com/soheil-stack/blockchain/internal/nameservice"
+	"github.com/soheil-stack/blockchain/internal/peer"
+	"github.com/soheil-stack/blockchain/internal/server"
 	"github.com/soheil-stack/blockchain/internal/state"
 	"github.com/soheil-stack/blockchain/internal/storage"
 )
@@ -44,11 +44,13 @@ func run() error {
 		NameServiceFolder string
 		DBPath            string
 		SelectStrategy    string
+		Host              string
 	}{
 		Beneficiary:       getEnv("BENEFICIARY", "beneficiary"),
 		NameServiceFolder: getEnv("NAME_SERVICE_FOLDER", "zblock/accounts"),
 		DBPath:            getEnv("DB_PATH", "zblock/miner"),
 		SelectStrategy:    getEnv("SELECT_STRATEGY", "tip"),
+		Host:              getEnv("HOST", "0.0.0.0:8080"),
 	}
 
 	slog.Info(
@@ -83,12 +85,20 @@ func run() error {
 		return fmt.Errorf("initializing storage: %w", err)
 	}
 
+	originPeers := []string{"0.0.0.0:8081"}
+	peerSet := peer.NewPeerSet()
+	for _, host := range originPeers {
+		peerSet.Add(peer.New(host))
+	}
+	peerSet.Add(peer.New(cfg.Host))
+
 	st, err := state.NewState(state.StateConfig{
 		Beneficiary:    beneficiaryAddress,
 		Genesis:        genesis,
 		EvHandler:      evHandler,
 		SelectStrategy: cfg.SelectStrategy,
 		Storage:        diskStorage,
+		KnownPeers:     peerSet,
 	})
 	if err != nil {
 		return fmt.Errorf("initializing state: %w", err)
@@ -112,34 +122,18 @@ func run() error {
 	signal.Notify(sigint, os.Interrupt)
 	serverError := make(chan error, 1)
 
-	publicHandler := public.NewServer(st, ns)
-	publicServer := http.Server{
-		Addr:         ":8080",
-		Handler:      publicHandler,
+	serverHandler := server.New(st, ns)
+	server := http.Server{
+		Addr:         cfg.Host,
+		Handler:      serverHandler,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 20 * time.Second,
 		IdleTimeout:  time.Minute,
 	}
 	go func() {
-		slog.Info("public server starting", "addr", publicServer.Addr)
-		if err := publicServer.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("public server failed", "err", err)
-			serverError <- err
-		}
-	}()
-
-	privateHandler := private.NewServer(st)
-	privateServer := http.Server{
-		Addr:         ":8081",
-		Handler:      privateHandler,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 20 * time.Second,
-		IdleTimeout:  time.Minute,
-	}
-	go func() {
-		slog.Info("private server starting", "addr", privateServer.Addr)
-		if err := privateServer.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("private server failed", "err", err)
+		slog.Info("http server starting", "addr", server.Addr)
+		if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("http server failed", "err", err)
 			serverError <- err
 		}
 	}()
@@ -153,15 +147,10 @@ func run() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		if err := publicServer.Shutdown(ctx); err != nil {
-			return fmt.Errorf("could not shutdown public server gracefully: %w", err)
+		if err := server.Shutdown(ctx); err != nil {
+			return fmt.Errorf("could not shutdown http server gracefully: %w", err)
 		}
-		slog.Info("public server stopped")
-
-		if err := privateServer.Shutdown(ctx); err != nil {
-			return fmt.Errorf("could not shutdown private server gracefully: %w", err)
-		}
-		slog.Info("private server stopped")
+		slog.Info("http server stopped")
 	}
 
 	slog.Info("node shutdown complete")

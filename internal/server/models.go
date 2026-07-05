@@ -1,4 +1,4 @@
-package public
+package server
 
 import (
 	"github.com/ethereum/go-ethereum/common"

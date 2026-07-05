@@ -1,19 +1,19 @@
-package public
+package server
 
 import (
 	"net/http"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/soheil-stack/blockchain/cmd/node/handlers"
 	"github.com/soheil-stack/blockchain/internal/core"
 	"github.com/soheil-stack/blockchain/internal/nameservice"
+	"github.com/soheil-stack/blockchain/internal/peer"
 	"github.com/soheil-stack/blockchain/internal/state"
 )
 
 func GetGenesis(s *state.State) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		genesis := s.Genesis()
-		if err := handlers.Encode(w, r, genesis); err != nil {
+		if err := encode(w, r, genesis); err != nil {
 			http.Error(w, "failed to encode response", http.StatusInternalServerError)
 		}
 	})
@@ -28,7 +28,7 @@ func GetAccounts(s *state.State, ns *nameservice.NameService) http.Handler {
 			response = append(response, toAccountResponse(ns, account))
 		}
 
-		if err := handlers.Encode(w, r, response); err != nil {
+		if err := encode(w, r, response); err != nil {
 			http.Error(w, "failed to encode response", http.StatusInternalServerError)
 		}
 	})
@@ -45,7 +45,7 @@ func GetAccount(s *state.State, ns *nameservice.NameService) http.Handler {
 
 		response := toAccountResponse(ns, account)
 
-		if err := handlers.Encode(w, r, response); err != nil {
+		if err := encode(w, r, response); err != nil {
 			http.Error(w, "failed to encode response", http.StatusInternalServerError)
 		}
 	})
@@ -79,7 +79,7 @@ func GetMempoolTransactions(s *state.State, ns *nameservice.NameService) http.Ha
 			response = append(response, transaction)
 		}
 
-		if err := handlers.Encode(w, r, response); err != nil {
+		if err := encode(w, r, response); err != nil {
 			http.Error(w, "failed to encode response", http.StatusInternalServerError)
 		}
 	})
@@ -87,7 +87,7 @@ func GetMempoolTransactions(s *state.State, ns *nameservice.NameService) http.Ha
 
 func PostTransaction(s *state.State) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tx, err := handlers.Decode[core.Transaction](r)
+		tx, err := decode[core.Transaction](r)
 		if err != nil {
 			http.Error(w, "failed to decode request payload", http.StatusBadRequest)
 			return
@@ -105,7 +105,45 @@ func PostTransaction(s *state.State) http.Handler {
 			"transaction added to mempool",
 		}
 
-		if err := handlers.Encode(w, r, response); err != nil {
+		if err := encode(w, r, response); err != nil {
+			http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		}
+	})
+}
+
+func PostPeer(s *state.State) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		peer, err := decode[peer.Peer](r)
+		if err != nil {
+			http.Error(w, "failed to decode request payload", http.StatusBadRequest)
+			return
+		}
+
+		s.AddKnownPeer(peer)
+
+		response := struct {
+			Status string `json:"status"`
+		}{
+			"peer added to known peers",
+		}
+
+		if err := encode(w, r, response); err != nil {
+			http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		}
+	})
+}
+
+func GetStatus(s *state.State) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		latstBlock := s.LatestBlock()
+
+		status := peer.PeerStatus{
+			LatestBlockHash:   latstBlock.Hash(),
+			LatestBlockNumber: latstBlock.Header.Number,
+			KnownPeers:        s.KnownExternalPeers(),
+		}
+
+		if err := encode(w, r, status); err != nil {
 			http.Error(w, "failed to encode response", http.StatusInternalServerError)
 		}
 	})
