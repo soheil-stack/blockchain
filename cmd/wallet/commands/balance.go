@@ -2,11 +2,11 @@ package commands
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/soheil-stack/blockchain/internal/core"
 	"github.com/urfave/cli/v3"
 )
 
@@ -21,21 +21,13 @@ var balanceCommand = &cli.Command{
 		address := crypto.PubkeyToAddress(privateKey.PublicKey)
 		fmt.Println("For Account:", address)
 
-		response, err := http.Get(fmt.Sprintf("%s/accounts/%s", nodeURL, address))
-		if err != nil {
-			return err
-		}
-		defer func() {
-			_ = response.Body.Close()
-		}()
-
-		decoder := json.NewDecoder(response.Body)
 		var account struct {
 			Balance uint64 `json:"balance"`
 		}
-		err = decoder.Decode(&account)
+		url := fmt.Sprintf("%s/accounts/%s", nodeURL, address)
+		err = core.Send(http.MethodGet, url, nil, &account)
 		if err != nil {
-			return fmt.Errorf("decoding response: %w", err)
+			return err
 		}
 
 		fmt.Println("Balance:", account.Balance)

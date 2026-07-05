@@ -1,9 +1,7 @@
 package commands
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -71,19 +69,9 @@ var sendCommand = &cli.Command{
 			return err
 		}
 
-		txBytes, err := json.Marshal(tx)
-		if err != nil {
-			return err
-		}
+		url := fmt.Sprintf("%s/transactions", nodeURL)
+		err = core.Send(http.MethodPost, url, tx, nil)
 
-		response, err := http.Post(fmt.Sprintf("%s/transactions", nodeURL), "application/json", bytes.NewBuffer(txBytes))
-		if err != nil {
-			return err
-		}
-		defer func() {
-			_ = response.Body.Close()
-		}()
-
-		return nil
+		return err
 	},
 }
