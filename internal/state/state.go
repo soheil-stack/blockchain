@@ -10,7 +10,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/soheil-stack/blockchain/internal/core"
-	"github.com/soheil-stack/blockchain/internal/peer"
 )
 
 type StateConfig struct {
@@ -19,7 +18,8 @@ type StateConfig struct {
 	EvHandler      core.EventHandler
 	SelectStrategy string
 	Storage        Storage
-	KnownPeers     *peer.PeerSet
+	KnownPeers     *core.PeerSet
+	Host           string
 }
 
 type State struct {
@@ -29,7 +29,7 @@ type State struct {
 	mempool     *Mempool
 	evHandler   core.EventHandler
 	mu          sync.RWMutex
-	knownPeers  *peer.PeerSet
+	knownPeers  *core.PeerSet
 	host        string
 	Worker      *Worker
 }
@@ -57,6 +57,7 @@ func NewState(config StateConfig) (*State, error) {
 		beneficiary: config.Beneficiary,
 		genesis:     config.Genesis,
 		knownPeers:  config.KnownPeers,
+		host:        config.Host,
 		db:          db,
 		mempool:     mempool,
 		evHandler:   evHandler,
@@ -109,6 +110,7 @@ func (state *State) UpsertTransaction(tx core.Transaction) error {
 		return err
 	}
 
+	state.Worker.SignalShareTx(tx)
 	state.Worker.SignalStartMining()
 
 	return nil
@@ -182,19 +184,19 @@ func (state *State) ValidateBlockAndUpdateDatabase(block core.Block) error {
 	return nil
 }
 
-func (state *State) AddKnownPeer(peer peer.Peer) bool {
+func (state *State) AddKnownPeer(peer core.Peer) bool {
 	return state.knownPeers.Add(peer)
 }
 
-func (state *State) RemoveKnownPeer(peer peer.Peer) {
+func (state *State) RemoveKnownPeer(peer core.Peer) {
 	state.knownPeers.Remove(peer)
 }
 
-func (state *State) KnownExternalPeers() []peer.Peer {
+func (state *State) KnownExternalPeers() []core.Peer {
 	return state.knownPeers.Copy(state.host)
 }
 
-func (state *State) KnownPeers() []peer.Peer {
+func (state *State) KnownPeers() []core.Peer {
 	return state.knownPeers.Copy("")
 }
 
@@ -206,15 +208,15 @@ func (state *State) Host() string {
 	return state.host
 }
 
-func (state *State) NetRequestPeerStatus(p peer.Peer) (peer.PeerStatus, error) {
+func (state *State) NetRequestPeerStatus(p core.Peer) (core.PeerStatus, error) {
 	state.evHandler("state: NetRequestPeerStatus: started: %s", p.Host)
 	defer state.evHandler("state: NetRequestPeerStatus: completed: %s", p.Host)
 
-	var peerStatus peer.PeerStatus
+	var peerStatus core.PeerStatus
 	url := fmt.Sprintf("http://%s/node/status", p.Host)
 	err := core.Send(http.MethodGet, url, nil, &peerStatus)
 	if err != nil {
-		return peer.PeerStatus{}, err
+		return core.PeerStatus{}, err
 	}
 
 	state.evHandler("state: NetRequestPeerStatus: peer-node[%s]: latest-blockNumber[%d]: peer-list[%s]", p.Host, peerStatus.LatestBlockNumber, peerStatus.KnownPeers)
@@ -222,7 +224,7 @@ func (state *State) NetRequestPeerStatus(p peer.Peer) (peer.PeerStatus, error) {
 	return peerStatus, nil
 }
 
-func (state *State) NetRequestPeerMempool(p peer.Peer) ([]core.Transaction, error) {
+func (state *State) NetRequestPeerMempool(p core.Peer) ([]core.Transaction, error) {
 	state.evHandler("state: NetRequestPeerMempool: started: %s", p.Host)
 	defer state.evHandler("state: NetRequestPeerMempool: completed: %s", p.Host)
 
@@ -238,35 +240,116 @@ func (state *State) NetRequestPeerMempool(p peer.Peer) ([]core.Transaction, erro
 	return mempool, err
 }
 
-func (state *State) NetRequestPeerBlocks(p peer.Peer) error {
-	return nil
-}
+func (state *State) NetRequestPeerBlocks(p core.Peer) error {
+	state.evHandler("state: NetRequestPeerBlocks: started: %s", p.Host)
+	defer state.evHandler("state: NetRequestPeerBlocks: completed: %s", p.Host)
 
-func (state *State) NetSendNodeAvailableToPeers() error {
-	state.evHandler("state: NetSendNodeAvailableToPeers: started")
-	defer state.evHandler("state: NetSendNodeAvailableToPeers: completed")
+	var blocks []core.Block
 
-	host := state.Host()
-	selfPeer := peer.Peer{
-		Host: host,
+	url := fmt.Sprintf("http://%s/blocks?from=%d&to=latest", p.Host, state.LatestBlock().Header.Number+1)
+	err := core.Send(http.MethodGet, url, nil, &blocks)
+	if err != nil {
+		return err
 	}
 
-	for _, peer := range state.KnownExternalPeers() {
-		state.evHandler("state: NetSendNodeAvailableToPeers: send: host[%s] to peer[%s]", host, peer)
+	state.evHandler("state: NetRequestPeerBlocks: blocks[%d]", len(blocks))
 
-		url := fmt.Sprintf("http://%s/node/peers", peer.Host)
-		if err := core.Send(http.MethodPost, url, selfPeer, nil); err != nil {
-			state.evHandler("state: NetSendNodeAvailableToPeers: ERROR: %s", err)
+	for _, block := range blocks {
+		if err := state.ProcessProposedBlock(block); err != nil {
+			return err
 		}
 	}
 
 	return nil
 }
 
-func (state *State) NetSendBlockToPeers(block core.Block) error {
+func (state *State) NetSendNodeAvailableToPeers() {
+	state.evHandler("state: NetSendNodeAvailableToPeers: started")
+	defer state.evHandler("state: NetSendNodeAvailableToPeers: completed")
+
+	host := state.Host()
+	selfPeer := core.Peer{
+		Host: host,
+	}
+
+	for _, peer := range state.KnownExternalPeers() {
+		state.evHandler("state: NetSendNodeAvailableToPeers: send: host[%s] to peer[%s]", host, peer)
+
+		url := fmt.Sprintf("http://%s/node/peers", peer)
+		if err := core.Send(http.MethodPost, url, selfPeer, nil); err != nil {
+			state.evHandler("state: NetSendNodeAvailableToPeers: ERROR: %s", err)
+		}
+	}
+}
+
+func (state *State) NetSendBlockToPeers(block core.Block) {
+	state.evHandler("state: NetSendBlockToPeers: started")
+	defer state.evHandler("state: NetSendBlockToPeers: completed")
+
+	for _, peer := range state.KnownExternalPeers() {
+		state.evHandler("state: NetSendBlockToPeers: send: block[%s] to peer[%s]", block.Hash(), peer)
+
+		url := fmt.Sprintf("http://%s/blocks", peer)
+		if err := core.Send(http.MethodPost, url, block, nil); err != nil {
+			state.evHandler("state: NetSendBlockToPeers: ERROR: %s", err)
+		}
+	}
+}
+
+func (state *State) NetSendTxToPeers(tx core.Transaction) {
+	state.evHandler("state: NetSendTxToPeers: started")
+	defer state.evHandler("state: NetSendTxToPeers: completed")
+
+	for _, peer := range state.KnownExternalPeers() {
+		state.evHandler("state: NetSendTxToPeers: send: tx[%s] to peer[%s]", tx, peer)
+
+		url := fmt.Sprintf("http://%s/transactions", peer)
+		if err := core.Send(http.MethodPost, url, tx, nil); err != nil {
+			state.evHandler("state: NetSendTxToPeers: ERROR: %s", err)
+		}
+	}
+}
+
+func (state *State) QueryBlocks(from, to uint64) []core.Block {
+	const maxUnit64 = ^uint64(0)
+	if from == maxUnit64 {
+		from = state.LatestBlock().Header.Number
+		to = from
+	}
+
+	if to == maxUnit64 {
+		to = state.LatestBlock().Header.Number
+	}
+
+	if from > to {
+		return nil
+	}
+
+	var blocks []core.Block
+	for i := from; i <= to; i++ {
+		block, err := state.db.GetBlock(i)
+		if err != nil {
+			state.evHandler("state: QueryBlocks: ERROR: %s", err)
+			return nil
+		}
+
+		blocks = append(blocks, block)
+	}
+
+	return blocks
+}
+
+func (state *State) ProcessProposedBlock(block core.Block) error {
+	state.evHandler("state: ProcessProposedBlock: started: newBlock[%s]", block.Hash())
+	defer state.evHandler("state: ProcessProposedBlock: completed: newBlock[%s]", block.Hash())
+
+	if err := state.ValidateBlockAndUpdateDatabase(block); err != nil {
+		return err
+	}
+
+	state.Worker.SignalCancelMining()
+
 	return nil
 }
 
-func (state *State) NetSendTxToPeers(tx core.Transaction) error {
-	return nil
-}
+func (state *State) Reorganize() {}

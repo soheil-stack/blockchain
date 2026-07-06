@@ -17,6 +17,7 @@ func Send(method string, url string, dataSend, dataReceive any) error {
 		if err != nil {
 			return err
 		}
+
 		req, err = http.NewRequest(method, url, bytes.NewReader(data))
 		if err != nil {
 			return nil
@@ -29,12 +30,16 @@ func Send(method string, url string, dataSend, dataReceive any) error {
 		}
 	}
 
+	req.Header.Set("Content-Type", "application/json")
+
 	var client http.Client
 	response, err := client.Do(req)
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() {
+		_ = response.Body.Close()
+	}()
 
 	if response.StatusCode == http.StatusNoContent {
 		return nil
@@ -45,12 +50,13 @@ func Send(method string, url string, dataSend, dataReceive any) error {
 		if err != nil {
 			return nil
 		}
+
 		return errors.New(string(msg))
 	}
 
 	if dataReceive != nil {
 		if err := json.NewDecoder(response.Body).Decode(dataReceive); err != nil {
-			return nil
+			return err
 		}
 	}
 

@@ -210,3 +210,7 @@ func (db *Database) ApplyTransaction(block core.Block, tx core.Transaction) erro
 func (db *Database) Write(block core.Block) error {
 	return db.storage.Write(block)
 }
+
+func (db *Database) GetBlock(number uint64) (core.Block, error) {
+	return db.storage.GetBlock(number)
+}

@@ -1,4 +1,4 @@
-package peer
+package core
 
 import (
 	"sync"
@@ -10,7 +10,7 @@ type Peer struct {
 	Host string
 }
 
-func New(Host string) Peer {
+func NewPeer(Host string) Peer {
 	return Peer{
 		Host: Host,
 	}
@@ -18,6 +18,10 @@ func New(Host string) Peer {
 
 func (peer Peer) Match(host string) bool {
 	return peer.Host == host
+}
+
+func (peer Peer) String() string {
+	return peer.Host
 }
 
 type PeerSet struct {

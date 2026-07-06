@@ -37,6 +37,11 @@ func encode(w http.ResponseWriter, r *http.Request, v any) error {
 		mimeType = "application/json"
 	}
 
+	if v == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}
+
 	buf := new(bytes.Buffer)
 	switch mimeType {
 	case "application/json":

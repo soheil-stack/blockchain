@@ -13,7 +13,6 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/soheil-stack/blockchain/internal/core"
 	"github.com/soheil-stack/blockchain/internal/nameservice"
-	"github.com/soheil-stack/blockchain/internal/peer"
 	"github.com/soheil-stack/blockchain/internal/server"
 	"github.com/soheil-stack/blockchain/internal/state"
 	"github.com/soheil-stack/blockchain/internal/storage"
@@ -85,12 +84,14 @@ func run() error {
 		return fmt.Errorf("initializing storage: %w", err)
 	}
 
-	originPeers := []string{"0.0.0.0:8081"}
-	peerSet := peer.NewPeerSet()
+	// TODO: do not hardcode origin peers
+	originPeers := []string{"0.0.0.0:8080"}
+
+	peerSet := core.NewPeerSet()
 	for _, host := range originPeers {
-		peerSet.Add(peer.New(host))
+		peerSet.Add(core.NewPeer(host))
 	}
-	peerSet.Add(peer.New(cfg.Host))
+	peerSet.Add(core.NewPeer(cfg.Host))
 
 	st, err := state.NewState(state.StateConfig{
 		Beneficiary:    beneficiaryAddress,
@@ -99,6 +100,7 @@ func run() error {
 		SelectStrategy: cfg.SelectStrategy,
 		Storage:        diskStorage,
 		KnownPeers:     peerSet,
+		Host:           cfg.Host,
 	})
 	if err != nil {
 		return fmt.Errorf("initializing state: %w", err)

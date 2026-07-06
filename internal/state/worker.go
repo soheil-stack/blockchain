@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/soheil-stack/blockchain/internal/core"
-	"github.com/soheil-stack/blockchain/internal/peer"
 )
 
 type Worker struct {
@@ -16,6 +15,7 @@ type Worker struct {
 	shut         chan struct{}
 	startMining  chan bool
 	cancelMining chan bool
+	txSharing    chan core.Transaction
 	evHandler    core.EventHandler
 }
 
@@ -25,6 +25,7 @@ func RunWorker(state *State, evHandler core.EventHandler) {
 		shut:         make(chan struct{}),
 		startMining:  make(chan bool, 1),
 		cancelMining: make(chan bool, 1),
+		txSharing:    make(chan core.Transaction, 100),
 		evHandler:    evHandler,
 	}
 
@@ -33,6 +34,7 @@ func RunWorker(state *State, evHandler core.EventHandler) {
 	worker.Sync()
 
 	operations := []func(){
+		worker.shareTxOperation,
 		worker.powOperation,
 	}
 
@@ -58,6 +60,42 @@ func (worker *Worker) Shutdown() {
 	worker.wg.Wait()
 }
 
+func (worker *Worker) Sync() {
+	worker.evHandler("worker: Sync: started")
+	defer worker.evHandler("worker: Sync: completed")
+
+	for _, peer := range worker.state.KnownExternalPeers() {
+		peerStatus, err := worker.state.NetRequestPeerStatus(peer)
+		if err != nil {
+			worker.evHandler("worker: Sync: queryPeerStatus: %s: ERROR: %s", peer, err)
+			continue
+		}
+
+		worker.addNewPeers(peerStatus.KnownPeers)
+
+		mempool, err := worker.state.NetRequestPeerMempool(peer)
+		if err != nil {
+			worker.evHandler("worker: Sync: retrievePeerMempool: %s: ERROR: %s", peer, err)
+			continue
+		}
+
+		for _, tx := range mempool {
+			worker.evHandler("worker: Sync: retrievePeerMempool: %s: Add tx[%s]", peer, tx)
+			_ = worker.state.MempoolUpsert(tx)
+		}
+
+		if peerStatus.LatestBlockNumber > worker.state.LatestBlock().Header.Number {
+			worker.evHandler("worker: Sync: retrievePeerBlocks: %s: latestBlockNumber[%d]", peer, peerStatus.LatestBlockNumber)
+
+			if err := worker.state.NetRequestPeerBlocks(peer); err != nil {
+				worker.evHandler("worker: Sync: retrievePeerBlocks: %s: ERROR: %s", peer, err)
+			}
+		}
+	}
+
+	worker.state.NetSendNodeAvailableToPeers()
+}
+
 func (worker *Worker) SignalStartMining() {
 	select {
 	case worker.startMining <- true:
@@ -72,6 +110,15 @@ func (worker *Worker) SignalCancelMining() {
 	default:
 	}
 	worker.evHandler("worker: SignalCancelMining: MINING: CANCEL: signaled")
+}
+
+func (worker *Worker) SignalShareTx(tx core.Transaction) {
+	select {
+	case worker.txSharing <- tx:
+		worker.evHandler("worker: SignalShareTx: share transaction signaled")
+	default:
+		worker.evHandler("worker: SignalShareTx: queue is full, transaction won't be shared")
+	}
 }
 
 func (worker *Worker) powOperation() {
@@ -140,7 +187,7 @@ func (worker *Worker) runPowOperation() {
 		}()
 
 		t := time.Now()
-		_, err := worker.state.MineNewBlock(ctx)
+		block, err := worker.state.MineNewBlock(ctx)
 		duration := time.Since(t)
 
 		worker.evHandler("worker: runPowOperation: MINING: completed: duration[%f]", duration.Seconds())
@@ -159,59 +206,30 @@ func (worker *Worker) runPowOperation() {
 		}
 
 		// we mined a block
+		worker.state.NetSendBlockToPeers(block)
 	}()
 
 	wg.Wait()
 }
 
-func (worker *Worker) isShutdown() bool {
-	select {
-	case <-worker.shut:
-		return true
-	default:
-		return false
-	}
-}
+func (worker *Worker) shareTxOperation() {
+	worker.evHandler("worker: shareTxOperation: G started")
+	defer worker.evHandler("worker: shareTxOperation: G completed")
 
-func (worker *Worker) Sync() {
-	worker.evHandler("worker: Sync: started")
-	defer worker.evHandler("worker: Sync: completed")
-
-	for _, peer := range worker.state.KnownExternalPeers() {
-		peerStatus, err := worker.state.NetRequestPeerStatus(peer)
-		if err != nil {
-			worker.evHandler("worker: Sync: queryPeerStatus: %s: ERROR: %s", peer.Host, err)
-			continue
-		}
-
-		worker.addNewPeers(peerStatus.KnownPeers)
-
-		mempool, err := worker.state.NetRequestPeerMempool(peer)
-		if err != nil {
-			worker.evHandler("worker: Sync: retrievePeerMempool: %s: ERROR: %s", peer.Host, err)
-			continue
-		}
-
-		for _, tx := range mempool {
-			worker.evHandler("worker: Sync: retrievePeerMempool: %s: Add tx[%s]", peer.Host, tx)
-			_ = worker.state.MempoolUpsert(tx)
-		}
-
-		if peerStatus.LatestBlockNumber > worker.state.LatestBlock().Header.Number {
-			worker.evHandler("worker: Sync: retrievePeerBlocks: %s: latestBlockNumber[%d]", peer.Host, peerStatus.LatestBlockNumber)
-
-			if err := worker.state.NetRequestPeerBlocks(peer); err != nil {
-				worker.evHandler("worker: Sync: retrievePeerBlocks: %s: ERROR: %s", peer.Host, err)
+	for {
+		select {
+		case tx := <-worker.txSharing:
+			if !worker.isShutdown() {
+				worker.state.NetSendTxToPeers(tx)
 			}
+		case <-worker.shut:
+			worker.evHandler("worker: shareTxOperation: received shut signal")
+			return
 		}
-	}
-
-	if err := worker.state.NetSendNodeAvailableToPeers(); err != nil {
-		worker.evHandler("worker: Sync: sendNodeAvailableToPeers: ERROR: %s", err)
 	}
 }
 
-func (worker *Worker) addNewPeers(peers []peer.Peer) {
+func (worker *Worker) addNewPeers(peers []core.Peer) {
 	worker.evHandler("worker: runPeerUpdatesOperation: addNewPeers: started")
 	defer worker.evHandler("worker: runPeerUpdatesOperation: addNewPeers: completed")
 
@@ -221,7 +239,16 @@ func (worker *Worker) addNewPeers(peers []peer.Peer) {
 		}
 
 		if worker.state.AddKnownPeer(peer) {
-			worker.evHandler("worker: runPeerUpdatesOperation: addNewPeers: add peer nodes: adding peer-node %s", peer.Host)
+			worker.evHandler("worker: runPeerUpdatesOperation: addNewPeers: add peer nodes: adding peer-node %s", peer)
 		}
+	}
+}
+
+func (worker *Worker) isShutdown() bool {
+	select {
+	case <-worker.shut:
+		return true
+	default:
+		return false
 	}
 }

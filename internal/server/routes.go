@@ -18,6 +18,8 @@ func New(s *state.State, ns *nameservice.NameService) http.Handler {
 	mux.Handle("POST /transactions", PostTransaction(s))
 	mux.Handle("POST /node/peers", PostPeer(s))
 	mux.Handle("GET /node/status", GetStatus(s))
+	mux.Handle("GET /blocks", GetBlocks(s))
+	mux.Handle("POST /blocks", PostBlock(s))
 
 	var handler http.Handler = mux
 	handler = loggerMiddleware(handler)
