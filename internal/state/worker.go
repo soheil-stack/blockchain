@@ -16,6 +16,7 @@ type Worker struct {
 	startMining  chan bool
 	cancelMining chan bool
 	txSharing    chan core.Transaction
+	ticker       *time.Ticker
 	evHandler    core.EventHandler
 }
 
@@ -26,6 +27,7 @@ func RunWorker(state *State, evHandler core.EventHandler) {
 		startMining:  make(chan bool, 1),
 		cancelMining: make(chan bool, 1),
 		txSharing:    make(chan core.Transaction, 100),
+		ticker:       time.NewTicker(time.Minute),
 		evHandler:    evHandler,
 	}
 
@@ -34,6 +36,7 @@ func RunWorker(state *State, evHandler core.EventHandler) {
 	worker.Sync()
 
 	operations := []func(){
+		worker.peerOperation,
 		worker.shareTxOperation,
 		worker.powOperation,
 	}
@@ -227,6 +230,41 @@ func (worker *Worker) shareTxOperation() {
 			return
 		}
 	}
+}
+
+func (worker *Worker) peerOperation() {
+	worker.evHandler("worker: peerOperation: G started")
+	defer worker.evHandler("worker: peerOperation: G completed")
+
+	for {
+		select {
+		case <-worker.ticker.C:
+			if !worker.isShutdown() {
+				worker.runPeerOperation()
+			}
+		case <-worker.shut:
+			worker.evHandler("worker: peerOperation: received shutdown signal")
+			return
+		}
+	}
+}
+
+func (worker *Worker) runPeerOperation() {
+	worker.evHandler("worker: runPeerOperation: started")
+	defer worker.evHandler("worker: runPeerOperation: completed")
+
+	for _, peer := range worker.state.KnownExternalPeers() {
+
+		peerStatus, err := worker.state.NetRequestPeerStatus(peer)
+		if err != nil {
+			worker.evHandler("worker: runPeerOperation: requestPeerStatus: %s: ERROR: %s", peer, err)
+			worker.state.RemoveKnownPeer(peer)
+		}
+
+		worker.addNewPeers(peerStatus.KnownPeers)
+	}
+
+	worker.state.NetSendNodeAvailableToPeers()
 }
 
 func (worker *Worker) addNewPeers(peers []core.Peer) {
