@@ -107,6 +107,15 @@ func (worker *Worker) Sync() {
 }
 
 func (worker *Worker) SignalStartMining() {
+	if !worker.state.IsMiningAllowed() {
+		worker.evHandler("worker: SignalStartMining: MINING: not allowed")
+		return
+	}
+
+	if worker.state.Consensus() != ConsensusPow {
+		return
+	}
+
 	select {
 	case worker.startMining <- true:
 	default:
@@ -134,6 +143,11 @@ func (worker *Worker) SignalShareTx(tx core.Transaction) {
 func (worker *Worker) powOperation() {
 	worker.evHandler("worker: powOperation: G started")
 	defer worker.evHandler("worker: powOperation: G completed")
+
+	if !worker.state.IsMiningAllowed() {
+		worker.evHandler("worker: powOperation: MINING: not allowed")
+		return
+	}
 
 	for {
 		select {
@@ -225,6 +239,11 @@ func (worker *Worker) runPowOperation() {
 func (worker *Worker) poaOperation() {
 	worker.evHandler("worker: poaOperation: G started")
 	defer worker.evHandler("worker: poaOperation: G completed")
+
+	if !worker.state.IsMiningAllowed() {
+		worker.evHandler("worker: poaOperation: MINING: not allowed")
+		return
+	}
 
 	interval := time.Second * 12
 

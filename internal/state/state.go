@@ -38,6 +38,8 @@ type State struct {
 	knownPeers  *core.PeerSet
 	host        string
 	consensus   string
+	allowMining bool
+	resyncWG    sync.WaitGroup
 	Worker      *Worker
 }
 
@@ -69,6 +71,7 @@ func NewState(config StateConfig) (*State, error) {
 		db:          db,
 		mempool:     mempool,
 		evHandler:   evHandler,
+		allowMining: true,
 	}, nil
 }
 
@@ -76,7 +79,11 @@ func (state *State) Shutdown() error {
 	state.evHandler("state: shutdown started")
 	defer state.evHandler("state: shutdown finished")
 
+	defer state.db.Close()
+
 	state.Worker.Shutdown()
+
+	state.resyncWG.Wait()
 
 	return nil
 }
@@ -103,6 +110,10 @@ func (state *State) MempoolUpsert(tx core.Transaction) error {
 
 func (state *State) MempoolLength() int {
 	return state.mempool.Length()
+}
+
+func (state *State) Consensus() string {
+	return state.consensus
 }
 
 func (state *State) UpsertTransaction(tx core.Transaction) error {
@@ -365,8 +376,41 @@ func (state *State) ProcessProposedBlock(block core.Block) error {
 	return nil
 }
 
-func (state *State) Reorganize() {}
+func (state *State) Reorganize() {
+	state.mu.Lock()
+	defer state.mu.Unlock()
 
-func (state *State) Consensus() string {
-	return state.consensus
+	if !state.allowMining {
+		return
+	}
+
+	state.allowMining = false
+
+	state.resyncWG.Add(1)
+	go func() {
+		state.evHandler("state: Reorganize: started")
+
+		defer func() {
+			state.turnMiningOn()
+			state.evHandler("state: Reorganize: completed")
+			state.resyncWG.Done()
+		}()
+
+		_ = state.db.Reset()
+		state.Worker.Sync()
+	}()
+}
+
+func (state *State) IsMiningAllowed() bool {
+	state.mu.RLock()
+	defer state.mu.RUnlock()
+
+	return state.allowMining
+}
+
+func (state *State) turnMiningOn() {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	state.allowMining = true
 }
