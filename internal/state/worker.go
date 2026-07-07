@@ -3,6 +3,8 @@ package state
 import (
 	"context"
 	"errors"
+	"hash/fnv"
+	"sort"
 	"sync"
 	"time"
 
@@ -27,7 +29,7 @@ func RunWorker(state *State, evHandler core.EventHandler) {
 		startMining:  make(chan bool, 1),
 		cancelMining: make(chan bool, 1),
 		txSharing:    make(chan core.Transaction, 100),
-		ticker:       time.NewTicker(time.Minute),
+		ticker:       time.NewTicker(time.Second * 10),
 		evHandler:    evHandler,
 	}
 
@@ -35,10 +37,15 @@ func RunWorker(state *State, evHandler core.EventHandler) {
 
 	worker.Sync()
 
+	consensusOperation := worker.powOperation
+	if state.Consensus() == ConsensusPoa {
+		consensusOperation = worker.poaOperation
+	}
+
 	operations := []func(){
 		worker.peerOperation,
 		worker.shareTxOperation,
-		worker.powOperation,
+		consensusOperation,
 	}
 
 	worker.wg.Add(len(operations))
@@ -215,6 +222,103 @@ func (worker *Worker) runPowOperation() {
 	wg.Wait()
 }
 
+func (worker *Worker) poaOperation() {
+	worker.evHandler("worker: poaOperation: G started")
+	defer worker.evHandler("worker: poaOperation: G completed")
+
+	interval := time.Second * 12
+
+	for {
+		next := time.Now().Truncate(interval).Add(interval)
+		timer := time.NewTimer(time.Until(next))
+
+		select {
+		case <-timer.C:
+			timer.Stop()
+			if !worker.isShutdown() {
+				worker.runPoaOperation()
+			}
+		case <-worker.shut:
+			timer.Stop()
+			worker.evHandler("worker: poaOperation: received shutdown signal")
+			return
+		}
+	}
+}
+
+func (worker *Worker) runPoaOperation() {
+	worker.evHandler("worker: runPoaOperation: started")
+	defer worker.evHandler("worker: runPoaOperation: completed")
+
+	peer := worker.selection()
+	worker.evHandler("worker: runPoaOperation: SELECTED: %s", peer)
+
+	if !peer.Match(worker.state.Host()) {
+		return
+	}
+
+	if worker.state.MempoolLength() == 0 {
+		worker.evHandler("worker: runPoaOperation: no transaction in the mempool")
+		return
+	}
+
+	select {
+	case <-worker.cancelMining:
+		worker.evHandler("worker: runPowOperation: MINING: drained cancel channel")
+	default:
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		defer func() {
+			wg.Done()
+			cancel()
+		}()
+
+		select {
+		case <-worker.cancelMining:
+			worker.evHandler("worker: runPoaOperation: MINING: cancel mining")
+		case <-ctx.Done():
+		}
+	}()
+
+	go func() {
+		defer func() {
+			wg.Done()
+			cancel()
+		}()
+
+		t := time.Now()
+		block, err := worker.state.MineNewBlock(ctx)
+		duration := time.Since(t)
+
+		worker.evHandler("worker: runPoaOperation: MINING: completed: duration[%f]", duration.Seconds())
+
+		if err != nil {
+			switch {
+			case errors.Is(err, ErrMempoolIsEmpty):
+				worker.evHandler("worker: runPoaOperation: MINING: no transaction in the mempool")
+			case ctx.Err() != nil:
+				worker.evHandler("worker: runPoaOperation: MINING: CANCEL: completed")
+			default:
+				worker.evHandler("worker: runPoaOperation: MINING: ERROR: %s", err)
+			}
+
+			return
+		}
+
+		// we mined a block
+		worker.state.NetSendBlockToPeers(block)
+	}()
+
+	wg.Wait()
+}
+
 func (worker *Worker) shareTxOperation() {
 	worker.evHandler("worker: shareTxOperation: G started")
 	defer worker.evHandler("worker: shareTxOperation: G completed")
@@ -289,4 +393,22 @@ func (worker *Worker) isShutdown() bool {
 	default:
 		return false
 	}
+}
+
+func (worker *Worker) selection() core.Peer {
+	peers := worker.state.KnownPeers()
+
+	worker.evHandler("worker: runPoaOperation: selection: Host %s, List %v", worker.state.Host(), peers)
+
+	names := make([]string, len(peers))
+	for i, peer := range peers {
+		names[i] = peer.Host
+	}
+	sort.Strings(names)
+
+	h := fnv.New32a()
+	h.Write(worker.state.LatestBlock().Hash().Bytes())
+	index := h.Sum32() % uint32(len(names))
+
+	return peers[index]
 }

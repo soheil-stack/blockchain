@@ -44,12 +44,14 @@ func run() error {
 		DBPath            string
 		SelectStrategy    string
 		Host              string
+		Consensus         string
 	}{
 		Beneficiary:       getEnv("BENEFICIARY", "beneficiary"),
 		NameServiceFolder: getEnv("NAME_SERVICE_FOLDER", "zblock/accounts"),
 		DBPath:            getEnv("DB_PATH", "zblock/miner"),
 		SelectStrategy:    getEnv("SELECT_STRATEGY", "tip"),
 		Host:              getEnv("HOST", "0.0.0.0:8080"),
+		Consensus:         getEnv("CONSENSUS", "pow"),
 	}
 
 	slog.Info(
@@ -101,6 +103,7 @@ func run() error {
 		Storage:        diskStorage,
 		KnownPeers:     peerSet,
 		Host:           cfg.Host,
+		Consensus:      cfg.Consensus,
 	})
 	if err != nil {
 		return fmt.Errorf("initializing state: %w", err)

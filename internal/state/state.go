@@ -12,6 +12,11 @@ import (
 	"github.com/soheil-stack/blockchain/internal/core"
 )
 
+const (
+	ConsensusPow = "pow"
+	ConsensusPoa = "poa"
+)
+
 type StateConfig struct {
 	Beneficiary    common.Address
 	Genesis        core.Genesis
@@ -20,6 +25,7 @@ type StateConfig struct {
 	Storage        Storage
 	KnownPeers     *core.PeerSet
 	Host           string
+	Consensus      string
 }
 
 type State struct {
@@ -31,6 +37,7 @@ type State struct {
 	mu          sync.RWMutex
 	knownPeers  *core.PeerSet
 	host        string
+	consensus   string
 	Worker      *Worker
 }
 
@@ -58,6 +65,7 @@ func NewState(config StateConfig) (*State, error) {
 		genesis:     config.Genesis,
 		knownPeers:  config.KnownPeers,
 		host:        config.Host,
+		consensus:   config.Consensus,
 		db:          db,
 		mempool:     mempool,
 		evHandler:   evHandler,
@@ -127,9 +135,14 @@ func (state *State) MineNewBlock(ctx context.Context) (core.Block, error) {
 
 	transactions := state.MempoolPickBest(int(state.genesis.TransactionPerBlock))
 
+	difficulty := state.genesis.Difficulty
+	if state.Consensus() == ConsensusPoa {
+		difficulty = 1
+	}
+
 	block, err := core.NewBlock(ctx, core.BlockConfig{
 		Beneficiary:  state.beneficiary,
-		Difficulty:   state.genesis.Difficulty,
+		Difficulty:   difficulty,
 		MiningReward: state.genesis.MiningReward,
 		PrevBlock:    state.db.LatestBlock(),
 		StateRoot:    state.db.HashState(),
@@ -353,3 +366,7 @@ func (state *State) ProcessProposedBlock(block core.Block) error {
 }
 
 func (state *State) Reorganize() {}
+
+func (state *State) Consensus() string {
+	return state.consensus
+}
